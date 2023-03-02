@@ -31,3 +31,20 @@ defmodule MyPhoenixApp.Application do
 end
 
 ```
+
+You also need to wire up Plug.Telemetry in your endpoint
+```
+Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+```
+
+Example configuration
+```
+config :prometheus_phx,
+    duration_unit: :microseconds,
+    duration_buckets: Prometheus.Contrib.HTTP.microseconds_duration_buckets(),
+    controller_call_labels: [:action, :controller, :status],
+    error_rendered_labels: [:action, :controller, :status],
+    channel_join_labels: [:channel, :topic, :transport],
+    channel_receive_labels: [:channel, :topic, :transport, :event],
+    registry: :default
+```    

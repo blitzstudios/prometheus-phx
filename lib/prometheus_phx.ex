@@ -8,8 +8,7 @@ defmodule PrometheusPhx do
 
   require Prometheus.Contrib.HTTP
   alias Prometheus.Contrib.HTTP
-
-  @duration_unit :microseconds
+  alias PrometheusPhx.Config
 
   def setup do
     events = [
@@ -26,48 +25,52 @@ defmodule PrometheusPhx do
       nil
     )
 
+    duration_unit = Config.duration_unit()
+    buckets = Config.duration_buckets()
+
     Histogram.declare(
-      name: :"phoenix_controller_call_duration_#{@duration_unit}",
-      help: "Whole controller pipeline execution time in #{@duration_unit}.",
-      labels: [:action, :controller, :status],
-      buckets: HTTP.microseconds_duration_buckets(),
-      duration_unit: @duration_unit,
+      name: :"phoenix_controller_call_duration_#{duration_unit}",
+      help: "Whole controller pipeline execution time in #{duration_unit}.",
+      labels: Config.controller_call_labels(),
+      buckets: buckets,
+      duration_unit: duration_unit,
       registry: :default
     )
 
     Histogram.declare(
-      name: :"phoenix_controller_error_rendered_duration_#{@duration_unit}",
-      help: "View error rendering time in #{@duration_unit}.",
-      labels: [:action, :controller, :status],
-      buckets: HTTP.microseconds_duration_buckets(),
-      duration_unit: @duration_unit,
+      name: :"phoenix_controller_error_rendered_duration_#{duration_unit}",
+      help: "View error rendering time in #{duration_unit}.",
+      labels: Config.error_rendered_labels(),
+      buckets: buckets,
+      duration_unit: duration_unit,
       registry: :default
     )
 
     Histogram.declare(
-      name: :"phoenix_channel_join_duration_#{@duration_unit}",
-      help: "Phoenix channel join handler time in #{@duration_unit}",
-      labels: [:channel, :topic, :transport],
-      buckets: HTTP.microseconds_duration_buckets(),
-      duration_unit: @duration_unit,
+      name: :"phoenix_channel_join_duration_#{duration_unit}",
+      help: "Phoenix channel join handler time in #{duration_unit}",
+      labels: Config.channel_join_labels(),
+      buckets: buckets,
+      duration_unit: duration_unit,
       registry: :default
     )
 
     Histogram.declare(
-      name: :"phoenix_channel_receive_duration_#{@duration_unit}",
-      help: "Phoenix channel receive handler time in #{@duration_unit}",
-      labels: [:channel, :topic, :transport, :event],
-      buckets: HTTP.microseconds_duration_buckets(),
-      duration_unit: @duration_unit,
+      name: :"phoenix_channel_receive_duration_#{duration_unit}",
+      help: "Phoenix channel receive handler time in #{duration_unit}",
+      labels: Config.channel_receive_labels(),
+      buckets: buckets,
+      duration_unit: duration_unit,
       registry: :default
     )
   end
 
   def handle_event([:phoenix, :endpoint, :stop], %{duration: duration}, metadata, _config) do
-    with labels when is_list(labels) <- labels(metadata) do
+    duration_unit = Config.duration_unit()
+    with labels when is_list(labels) <- labels(metadata, Config.controller_call_labels()) do
       Histogram.observe(
         [
-          name: :"phoenix_controller_call_duration_#{@duration_unit}",
+          name: :"phoenix_controller_call_duration_#{duration_unit}",
           labels: labels,
           registry: :default
         ],
@@ -77,10 +80,11 @@ defmodule PrometheusPhx do
   end
 
   def handle_event([:phoenix, :error_rendered], %{duration: duration}, metadata, _config) do
-    with labels when is_list(labels) <- labels(metadata) do
+    duration_unit = Config.duration_unit()
+    with labels when is_list(labels) <- labels(metadata, Config.error_rendered_labels()) do
       Histogram.observe(
         [
-          name: :"phoenix_controller_error_rendered_duration_#{@duration_unit}",
+          name: :"phoenix_controller_error_rendered_duration_#{duration_unit}",
           labels: labels,
           registry: :default
         ],
@@ -90,10 +94,11 @@ defmodule PrometheusPhx do
   end
 
   def handle_event([:phoenix, :channel_joined], %{duration: duration}, metadata, _config) do
-    with labels when is_list(labels) <- labels(metadata) do
+    duration_unit = Config.duration_unit()
+    with labels when is_list(labels) <- labels(metadata, Config.channel_join_labels()) do
       Histogram.observe(
         [
-          name: :"phoenix_channel_join_duration_#{@duration_unit}",
+          name: :"phoenix_channel_join_duration_#{duration_unit}",
           labels: labels,
           registry: :default
         ],
@@ -108,10 +113,11 @@ defmodule PrometheusPhx do
         metadata,
         _config
       ) do
-    with labels when is_list(labels) <- labels(metadata) do
+    duration_unit = Config.duration_unit()
+    with labels when is_list(labels) <- labels(metadata, Config.channel_receive_labels()) do
       Histogram.observe(
         [
-          name: :"phoenix_channel_receive_duration_#{@duration_unit}",
+          name: :"phoenix_channel_receive_duration_#{duration_unit}",
           labels: labels,
           registry: :default
         ],
@@ -123,8 +129,9 @@ defmodule PrometheusPhx do
   def labels(%{
         status: status,
         conn: %{private: %{phoenix_action: action, phoenix_controller: controller}}
-      }) do
-    [action, controller, status]
+      }, config) do
+    data = %{status: status, action: action, controller: controller}
+    Enum.map(config, &Map.get(data, &1))
   end
 
   def labels(%{
@@ -132,20 +139,23 @@ defmodule PrometheusPhx do
           status: status,
           private: %{phoenix_action: action, phoenix_controller: controller}
         }
-      }) do
-    [action, controller, status]
+      }, config) do
+    data = %{status: status, action: action, controller: controller}
+    Enum.map(config, &Map.get(data, &1))
   end
 
-  def labels(%{status: status, stacktrace: [{module, function, _, _} | _]}) do
+  def labels(%{status: status, stacktrace: [{module, function, _, _} | _]}, _config) do
     [function, module, status]
   end
 
-  def labels(%{event: event, socket: %{channel: channel, topic: topic, transport: transport}}) do
-    [channel, topic, transport, event]
+  def labels(%{event: event, socket: %{channel: channel, topic: topic, transport: transport}}, config) do
+    data = %{event: event, channel: channel, topic: topic, transport: transport}
+    Enum.map(config, &Map.get(data, &1))
   end
 
-  def labels(%{socket: %{channel: channel, topic: topic, transport: transport}}) do
-    [channel, topic, transport]
+  def labels(%{socket: %{channel: channel, topic: topic, transport: transport}}, config) do
+    data = %{channel: channel, topic: topic, transport: transport}
+    Enum.map(config, &Map.get(data, &1))
   end
 
   def labels(_metadata), do: nil

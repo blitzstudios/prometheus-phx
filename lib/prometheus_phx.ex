@@ -158,5 +158,5 @@ defmodule PrometheusPhx do
     Enum.map(config, &Map.get(data, &1))
   end
 
-  def labels(_metadata), do: nil
+  def labels(_metadata, _config), do: nil
 end
